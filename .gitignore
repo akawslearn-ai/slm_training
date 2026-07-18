@@ -1,0 +1,22 @@
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Credentials (never commit)
+.env
+.env.local
+.env.*
+*.toml.local
+.modal.toml
+
+# Large local artifacts
+*.bin
+*.npz

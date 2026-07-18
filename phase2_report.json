@@ -1,0 +1,32 @@
+{
+  "case-law": {
+    "kept": 206684,
+    "est_tokens": 806244775,
+    "reasons": {
+      "near_dup": 1606,
+      "exact_dup": 0,
+      "contaminated": 24002,
+      "kept": 206684
+    }
+  },
+  "sec": {
+    "kept": 45035,
+    "est_tokens": 1091148638,
+    "reasons": {
+      "near_dup": 0,
+      "exact_dup": 1989,
+      "contaminated": 175,
+      "kept": 45035
+    }
+  },
+  "fineweb-edu": {
+    "kept": 418405,
+    "est_tokens": 499936147,
+    "reasons": {
+      "near_dup": 0,
+      "exact_dup": 62,
+      "contaminated": 0,
+      "kept": 418405
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "case-law": {
+    "streamed": 238207,
+    "kept": 232292,
+    "est_tokens": 997781896,
+    "reasons": {
+      "kept": 232292,
+      "too_short": 5230,
+      "ocr": 685
+    }
+  },
+  "sec": {
+    "streamed": 47752,
+    "kept": 47199,
+    "est_tokens": 1183432621,
+    "reasons": {
+      "kept": 47199,
+      "too_short": 553
+    }
+  },
+  "fineweb-edu": {
+    "streamed": 432821,
+    "kept": 418467,
+    "est_tokens": 500024050,
+    "reasons": {
+      "kept": 418467,
+      "too_short": 14348,
+      "non_english": 6
+    }
+  }
+}
