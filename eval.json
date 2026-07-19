@@ -1,0 +1,7 @@
+{
+  "val_loss": 2.2143265855540135,
+  "val_ppl": 9.155241763191281,
+  "windows_evaluated": 20096,
+  "target_tokens": 20558208,
+  "seconds": 36.5
+}

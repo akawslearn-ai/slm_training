@@ -234,6 +234,10 @@ def _worker(rank: int, world_size: int, epochs: float, smoke: bool, budget_usd: 
                 if is_main:
                     print(f"  [eval] step {step} val_loss {vl:.4f} ppl {np.exp(vl):.2f}",
                           flush=True)
+                    with open(config.METRICS_PATH, "a", encoding="utf-8") as fh:
+                        fh.write(json.dumps({"step": step, "val_loss": vl,
+                                             "val_ppl": float(np.exp(vl)),
+                                             "tokens": tokens_seen}) + "\n")
 
             if (step % t.ckpt_every_steps == 0 or step == total_steps) and is_main and not smoke:
                 torch.save({"model": model.state_dict(), "opt": opt.state_dict(),
@@ -297,6 +301,52 @@ def pretrain_1gpu(epochs: float = 2.0, budget_usd: float = config.BUDGET_CAP_USD
 @app.function(image=gpu_image, gpu=config.PRETRAIN_GPU, volumes=VOLUMES, timeout=60 * 30)
 def pretrain_smoke(compile_model: bool = True) -> None:
     _launch(1, 0.01, True, config.BUDGET_CAP_USD, compile_model)
+
+
+@app.function(image=gpu_image, gpu=config.PRETRAIN_GPU, volumes=VOLUMES, timeout=60 * 30)
+def eval_full() -> dict:
+    """Perplexity over the ENTIRE val split, persisted to /data/checkpoints/eval.json."""
+    import json
+    import math
+    import time
+
+    import numpy as np
+    import torch
+    from transformers import LlamaForCausalLM
+
+    model = LlamaForCausalLM.from_pretrained(config.BASE_CKPT_DIR).cuda().eval()
+    shards = _open_shards(config.VAL_TOKENS_DIR)
+    sid, row = _shard_index(shards)
+    order = np.arange(len(sid))
+    bs = config.TRAIN.micro_batch_size
+
+    total_nll, total_tok, nb = 0.0, 0, 0
+    t0 = time.time()
+    with torch.no_grad():
+        for arr in _batches(shards, sid, row, order, bs):
+            ids = torch.from_numpy(arr).cuda(non_blocking=True)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                loss = model(input_ids=ids, labels=ids).loss
+            # HF averages over (seq_len - 1) shifted targets per row.
+            n = ids.shape[0] * (ids.shape[1] - 1)
+            total_nll += loss.item() * n
+            total_tok += n
+            nb += 1
+
+    val_loss = total_nll / total_tok
+    out = {"val_loss": val_loss, "val_ppl": math.exp(val_loss),
+           "windows_evaluated": nb * bs, "target_tokens": total_tok,
+           "seconds": round(time.time() - t0, 1)}
+    with open(f"{config.CKPT_DIR}/eval.json", "w", encoding="utf-8") as fh:
+        json.dump(out, fh, indent=2)
+    volume.commit()
+    print(json.dumps(out, indent=2), flush=True)
+    return out
+
+
+@app.local_entrypoint()
+def evaluate_full():
+    eval_full.remote()
 
 
 @app.local_entrypoint()
