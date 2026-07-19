@@ -9,7 +9,7 @@ SLM: stream → clean → dedup/decontaminate → train tokenizer → tokenize/p
 uint16 token corpus on a Modal Volume. `replication_guide.md` is the authoritative spec; it is the
 brief the four source files were written from.
 
-Pretraining (Phase 5) and HF model push (Phase 6) are **not** implemented here.
+Phase 5 (pretraining) is implemented in `pretrain_app.py`. HF model push (Phase 6) is not.
 
 ## Commands
 
@@ -28,7 +28,15 @@ modal run modal_app.py::tokenizer           # Phase 3
 modal run modal_app.py::tokenize            # Phase 4 (14 workers)
 modal run modal_app.py::ocr                 # optional: OCR threshold histogram
 modal run verify_app.py                     # integrity check of Phase 4 output
+
+modal run pretrain_app.py::smoke            # Phase 5 validation, 40 steps 1 GPU, ~$0.15
+modal run pretrain_app.py::train --epochs 2 # Phase 5 on 8xH100 (accum=2)
+modal run pretrain_app.py::train1 --epochs 2  # same on 1 GPU (accum=16), ~8x wall-clock
+modal run sample_app.py                     # generate from the trained base model
 ```
+
+Phase 5 resumes automatically from `/data/checkpoints/ckpt.pt` if present. To train from
+scratch, delete that file first — otherwise a "new" run silently continues the old one.
 
 There is no test suite. `verify_app.py` is the verification path: it checks every `.bin` byte size
 against `index.json`, asserts token IDs are under `vocab_size`, and decodes real windows back to text.
@@ -113,3 +121,23 @@ The guide predicts 2.19B with case-law at 863M. This run measured case-law at 72
 fineweb-edu reproduce the guide to within 0.1%; the difference is case-law tokenizer compression
 (4.47 vs the guide's implied 3.74 chars/token), not data loss — Phase 1/2 proxy totals matched the
 guide exactly and `verify_app.py` reports zero byte mismatches.
+
+Phases 0-4 cost **$1.73**, not the guide's claimed $0.18. Phase 4 tokenization alone was $1.23
+(14 workers x 8 CPU x 16 GiB).
+
+## Phase 5 baseline (2026-07-19 run)
+
+2 epochs / 4.08B tokens / 7,778 steps. Final **val loss 2.2454, ppl 9.44**. ~$11.4 total.
+
+`torch.compile` is worth 2.7x here (152k -> 411k tok/s, 13% -> 36% MFU). A 125M model is small
+enough that kernel-launch overhead dominates without it. Do not benchmark throughput over the
+first few steps: compile and CUDA init swamp the average, which is why `_worker` starts its
+steady-state timer at step 3.
+
+Cost is roughly **independent of GPU count** (it tracks total FLOPs), so 1 GPU and 8 GPUs cost
+about the same; more GPUs only buy wall-clock. On Modal, H100 is ~2x more cost-efficient per
+FLOP than A100 80GB ($3.99 vs $8.01 per PFLOP-hr).
+
+The model generates fluent, register-correct legal and financial prose, but has no arithmetic
+reliability (it will state a revenue delta and percentage that do not follow from the two
+figures it just produced). Expected at this scale; do not treat generated numbers as a bug.

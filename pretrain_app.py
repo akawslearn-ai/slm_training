@@ -285,6 +285,15 @@ def pretrain(epochs: float = 2.0, budget_usd: float = config.BUDGET_CAP_USD,
     _launch(N_GPU, epochs, False, budget_usd, compile_model)
 
 
+@app.function(image=gpu_image, gpu=config.PRETRAIN_GPU, volumes=VOLUMES,
+              timeout=60 * 60 * 6)
+def pretrain_1gpu(epochs: float = 2.0, budget_usd: float = config.BUDGET_CAP_USD,
+                  compile_model: bool = True) -> None:
+    """Single-GPU path: same total cost as 8x (cost tracks FLOPs), ~8x wall-clock.
+    accum becomes 16, so the 524,288-token global batch is unchanged."""
+    _launch(1, epochs, False, budget_usd, compile_model)
+
+
 @app.function(image=gpu_image, gpu=config.PRETRAIN_GPU, volumes=VOLUMES, timeout=60 * 30)
 def pretrain_smoke(compile_model: bool = True) -> None:
     _launch(1, 0.01, True, config.BUDGET_CAP_USD, compile_model)
@@ -299,3 +308,9 @@ def smoke(compile_model: bool = True):
 def train(epochs: float = 2.0, budget_usd: float = config.BUDGET_CAP_USD,
           compile_model: bool = True):
     pretrain.remote(epochs, budget_usd, compile_model)
+
+
+@app.local_entrypoint()
+def train1(epochs: float = 2.0, budget_usd: float = config.BUDGET_CAP_USD,
+           compile_model: bool = True):
+    pretrain_1gpu.remote(epochs, budget_usd, compile_model)
