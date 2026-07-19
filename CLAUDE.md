@@ -9,7 +9,15 @@ SLM: stream → clean → dedup/decontaminate → train tokenizer → tokenize/p
 uint16 token corpus on a Modal Volume. `replication_guide.md` is the authoritative spec; it is the
 brief the four source files were written from.
 
-Phase 5 (pretraining) is implemented in `pretrain_app.py`. HF model push (Phase 6) is not.
+All phases are now implemented and shipped:
+
+| Phase | File | Output |
+|---|---|---|
+| 0–4 data pipeline | `modal_app.py` | packed token corpus on the Volume |
+| 5 pretraining | `pretrain_app.py` | `/data/checkpoints/base` |
+| 6 HF push | `push_app.py` | [abhishekai/slm-125m-legal-base](https://huggingface.co/abhishekai/slm-125m-legal-base), Apache-2.0 |
+| 7 inference API | `serve_app.py` | Modal CPU endpoint, streaming SSE |
+| 8 web app | `web/` | [slm-125m-legal.vercel.app](https://slm-125m-legal.vercel.app) |
 
 ## Commands
 
@@ -33,6 +41,19 @@ modal run pretrain_app.py::smoke            # Phase 5 validation, 40 steps 1 GPU
 modal run pretrain_app.py::train --epochs 2 # Phase 5 on 8xH100 (accum=2)
 modal run pretrain_app.py::train1 --epochs 2  # same on 1 GPU (accum=16), ~8x wall-clock
 modal run sample_app.py                     # generate from the trained base model
+modal run pretrain_app.py::evaluate_full    # perplexity over the ENTIRE val split
+
+modal run push_app.py --dry-run             # Phase 6: stage + verify bundle, no upload
+modal run push_app.py                       # Phase 6: push weights + tokenizer + card
+
+modal deploy serve_app.py                   # Phase 7: persistent inference URL
+modal serve serve_app.py                    # same, ephemeral + hot-reload for dev
+```
+
+```bash
+cd web && npm run dev                       # Phase 8: web app on :3000
+cd web && npm run build                     # also runs the TS check
+cd web && npx vercel --prod                 # deploy
 ```
 
 Phase 5 resumes automatically from `/data/checkpoints/ckpt.pt` if present. To train from
@@ -101,6 +122,27 @@ runs for sources with `strict_ocr=True` (case-law only).
 syntax, which is a Python syntax error. `modal_app.py` has the correct plain form. The guide also
 says Phase 1 launches 16 workers; it launches 20 (10+5+5).
 
+**`serve_app.py` must NOT use `from __future__ import annotations`**, unlike every other
+module here. PEP 563 turns annotations into strings, and FastAPI then cannot resolve a
+request model declared inside the method — the body silently degrades into a *query*
+parameter and every POST returns `422 Field required`. The file parses the raw `Request`
+instead and carries a comment saying so; do not "tidy" the future import back in.
+
+**Modal responses can be cached.** After `modal deploy`, a GET to `/health` may return the
+previous revision's body. It is not a failed deploy — add a cache-busting query param before
+concluding the code did not land. `/health` returns a `revision` field for exactly this.
+
+**Vercel enables Deployment Protection by default.** A fresh project ships with
+`ssoProtection: all_except_custom_domains`, so every `*.vercel.app` URL — production
+included — 302s to a Vercel SSO login and is not publicly viewable. Clear it with
+`PATCH /v9/projects/{id}` `{"ssoProtection": null}`. Also: renaming a project *after* a
+production deploy does not create the new alias, so `<new-name>.vercel.app` 404s until you
+run `vercel alias set` explicitly.
+
+**Two Modal secrets exist**: `huggingface-token` (`HUGGINGFACE_TOKEN`, used by `push_app.py`)
+and `slm-api-key` (`SLM_API_KEY`, used by `serve_app.py` and mirrored into Vercel as
+`MODAL_API_KEY`). Rotating the API key means updating both sides.
+
 ## Environment (Windows)
 
 - `export PYTHONIOENCODING=utf-8` before any `modal run` — the console's cp1252 codepage crashes on
@@ -127,7 +169,15 @@ Phases 0-4 cost **$1.73**, not the guide's claimed $0.18. Phase 4 tokenization a
 
 ## Phase 5 baseline (2026-07-19 run)
 
-2 epochs / 4.08B tokens / 7,778 steps. Final **val loss 2.2454, ppl 9.44**. ~$11.4 total.
+2 epochs / 4.08B tokens / 7,778 steps. Final **val loss 2.2454, ppl 9.44** (running eval, 50
+batches). The authoritative number is `eval_full` over the *entire* val split: **val loss
+2.2143, ppl 9.155** — that is what `eval.json` and the web app report.
+
+Cost was **$15.20**, not the $11.4 previously recorded here. `metrics.jsonl` contains three
+concatenated runs (one to step 7580 at $14.66, then two short resumes), and the `usd` field
+restarts its timer on resume — so reading the last row gives $0.41 and undercounts badly.
+Sum the per-run maxima. End-to-end that is $0.0049/PFLOP at 22.5% MFU including compile and
+CUDA init.
 
 `torch.compile` is worth 2.7x here (152k -> 411k tok/s, 13% -> 36% MFU). A 125M model is small
 enough that kernel-launch overhead dominates without it. Do not benchmark throughput over the
