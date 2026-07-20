@@ -87,11 +87,28 @@ async function redisLimit(ip: string, url: string, token: string): Promise<Limit
 
 // ---------------------------------------------------------------------------
 
-export async function rateLimit(ip: string): Promise<LimitResult> {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+/**
+ * Resolve Redis REST credentials under either naming convention.
+ *
+ * Provisioning the same Upstash database two different ways injects two
+ * different pairs of variable names:
+ *   - Upstash directly, or via the Vercel Marketplace -> UPSTASH_REDIS_REST_*
+ *   - Vercel Redis (formerly Vercel KV)               -> KV_REST_API_*
+ *
+ * Accepting both means the limiter starts working the moment a store is
+ * attached, regardless of which route was taken, with no code change.
+ */
+function redisCredentials(): { url: string; token: string } | null {
+  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+  return url && token ? { url: url.replace(/\/$/, ""), token } : null;
+}
 
-  if (url && token) {
+export async function rateLimit(ip: string): Promise<LimitResult> {
+  const creds = redisCredentials();
+
+  if (creds) {
+    const { url, token } = creds;
     try {
       return await redisLimit(ip, url, token);
     } catch (err) {
