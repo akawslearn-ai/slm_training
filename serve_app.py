@@ -56,6 +56,16 @@ API_KEY_SECRET = "slm-api-key"
     # who arrives during a session never pays the cold start twice.
     scaledown_window=300,
     timeout=60 * 10,
+    # HARD COST CEILING. Without this, Modal autoscales on concurrent load and a
+    # burst of traffic -- accidental or hostile -- fans out into arbitrarily many
+    # billed containers. This is the protection that actually bounds spend: a
+    # per-IP rate limiter does nothing against distributed requests, and caps the
+    # front door while leaving the backend unbounded.
+    #
+    # Two containers is enough for a demo (one visitor does not block another).
+    # Excess concurrency queues instead of scaling, so the failure mode under
+    # abuse is "slow", not "expensive".
+    max_containers=2,
 )
 class Server:
     @modal.enter()
